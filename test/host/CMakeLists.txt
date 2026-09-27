@@ -12,7 +12,12 @@ add_executable(test_runner
     ${COMPONENT_DIR}/src/command_queue.c
     ${COMPONENT_DIR}/src/auxbeam_light.c
     mock_hal_uart.c
-    smoke_main.c
+    test_util.c
+    test_checksum.c
+    test_protocol.c
+    test_queue.c
+    test_integration.c
+    main.c
 )
 
 target_include_directories(test_runner PRIVATE
@@ -25,4 +30,4 @@ target_include_directories(test_runner PRIVATE
 target_compile_options(test_runner PRIVATE -Wall -Wextra)
 
 enable_testing()
-add_test(NAME smoke COMMAND test_runner)
+add_test(NAME host_tests COMMAND test_runner)
