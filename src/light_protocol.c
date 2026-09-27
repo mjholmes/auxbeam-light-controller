@@ -1,0 +1,58 @@
+/**
+ * @file light_protocol.c
+ * @brief Protocol message encoding and decoding implementation
+ */
+
+#include "light_protocol.h"
+#include <string.h>
+
+void light_protocol_encode_command(auxbeam_message_t *msg, uint8_t seq_id, const auxbeam_output_state_t states[6]) {
+    memset(msg, 0, sizeof(auxbeam_message_t));
+
+    // Set fixed fields per protocol.md
+    msg->seq_id = seq_id;
+    msg->msg_type = 0x00;  // Command
+    msg->cmd_type = 0x08;  // Output command
+    msg->unknown = 0x0C;   // Output altering command marker
+
+    // Pack 6 output states into 4 bytes (2 nibbles per byte)
+    // outputs[0] = state 0 (low nibble) | state 1 (high nibble)
+    // outputs[1] = state 2 (low nibble) | state 3 (high nibble)
+    // outputs[2] = state 4 (low nibble) | state 5 (high nibble)
+    // outputs[3] = unused (0x00)
+    msg->outputs[0] = (states[0] & 0x0F) | ((states[1] & 0x0F) << 4);
+    msg->outputs[1] = (states[2] & 0x0F) | ((states[3] & 0x0F) << 4);
+    msg->outputs[2] = (states[4] & 0x0F) | ((states[5] & 0x0F) << 4);
+    msg->outputs[3] = 0x00;
+
+    // Padding bytes always 0x00
+    msg->padding[0] = 0x00;
+    msg->padding[1] = 0x00;
+
+    // Calculate checksum over first 10 bytes
+    msg->checksum = light_protocol_calculate_checksum((const uint8_t *)msg, 10);
+}
+
+bool light_protocol_decode_ack(const auxbeam_message_t *msg, uint8_t *seq_id_out) {
+    // Validate ACK format per protocol.md
+    if (msg->msg_type != 0xFF) {
+        return false;  // Not an acknowledgment
+    }
+
+    if (msg->cmd_type != 0xF8) {
+        return false;  // Invalid ACK cmd_type
+    }
+
+    // Verify checksum
+    uint8_t calculated_checksum = light_protocol_calculate_checksum((const uint8_t *)msg, 10);
+    if (calculated_checksum != msg->checksum) {
+        return false;  // Checksum mismatch
+    }
+
+    // Extract sequence ID
+    if (seq_id_out != NULL) {
+        *seq_id_out = msg->seq_id;
+    }
+
+    return true;
+}
