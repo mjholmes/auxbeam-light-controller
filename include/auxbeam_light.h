@@ -28,6 +28,7 @@ typedef enum {
     AUXBEAM_ERR_UART = -4,             /**< UART hardware error */
     AUXBEAM_ERR_TIMEOUT = -5,          /**< Command timeout */
     AUXBEAM_ERR_BAD_CHECKSUM = -6,     /**< Checksum validation failed */
+    AUXBEAM_ERR_ALREADY_INITIALIZED = -7, /**< init() called while already initialized */
 } auxbeam_error_t;
 
 /**

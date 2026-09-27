@@ -6,8 +6,6 @@
 #include "hal_uart.h"
 #include "driver/uart.h"
 #include "driver/gpio.h"
-#include <stdlib.h>
-#include <string.h>
 
 #define UART_BUF_SIZE 256
 
@@ -15,17 +13,16 @@ struct hal_uart_handle {
     int uart_num;
 };
 
+// Single static instance, matching the single-instance auxbeam_context_t
+// this HAL is used from — no heap allocation needed.
+static struct hal_uart_handle g_handle;
+
 int hal_uart_init(const hal_uart_config_t *config, hal_uart_handle_t **handle_out) {
     if (config == NULL || handle_out == NULL) {
         return -1;
     }
 
-    // Allocate handle
-    hal_uart_handle_t *handle = (hal_uart_handle_t *)malloc(sizeof(hal_uart_handle_t));
-    if (handle == NULL) {
-        return -1;
-    }
-    handle->uart_num = config->uart_num;
+    g_handle.uart_num = config->uart_num;
 
     // Configure UART parameters
     uart_config_t uart_config = {
@@ -39,24 +36,21 @@ int hal_uart_init(const hal_uart_config_t *config, hal_uart_handle_t **handle_ou
 
     // Install UART driver
     if (uart_driver_install(config->uart_num, UART_BUF_SIZE, UART_BUF_SIZE, 0, NULL, 0) != ESP_OK) {
-        free(handle);
         return -1;
     }
 
     if (uart_param_config(config->uart_num, &uart_config) != ESP_OK) {
         uart_driver_delete(config->uart_num);
-        free(handle);
         return -1;
     }
 
     if (uart_set_pin(config->uart_num, config->tx_pin, config->rx_pin,
                      UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE) != ESP_OK) {
         uart_driver_delete(config->uart_num);
-        free(handle);
         return -1;
     }
 
-    *handle_out = handle;
+    *handle_out = &g_handle;
     return 0;
 }
 
@@ -66,7 +60,6 @@ int hal_uart_deinit(hal_uart_handle_t *handle) {
     }
 
     uart_driver_delete(handle->uart_num);
-    free(handle);
     return 0;
 }
 

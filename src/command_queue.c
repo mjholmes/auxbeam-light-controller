@@ -6,6 +6,7 @@
 #include "command_queue.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <assert.h>
 #include <string.h>
 
 #define MAX_PENDING_COMMANDS 4
@@ -32,6 +33,19 @@ typedef struct {
 // Internal functions
 static command_queue_t g_queue = {0};
 
+// Debug-only invariant check: pending_count must always equal the number of
+// active slots (data-model.md Global Invariants #2). Compiled out via
+// assert() when NDEBUG is defined.
+static uint32_t command_queue_count_active(void) {
+    uint32_t n = 0;
+    for (int i = 0; i < MAX_PENDING_COMMANDS; i++) {
+        if (g_queue.slots[i].active) {
+            n++;
+        }
+    }
+    return n;
+}
+
 void command_queue_init(void) {
     memset(&g_queue, 0, sizeof(command_queue_t));
     g_queue.next_seq_id = 0;
@@ -55,6 +69,7 @@ pending_command_t* command_queue_allocate(uint8_t *seq_id_out) {
             // Increment sequence ID (wraps at 256)
             g_queue.next_seq_id++;
             g_queue.pending_count++;
+            assert(g_queue.pending_count == command_queue_count_active());
 
             return cmd;
         }
@@ -95,6 +110,8 @@ void command_queue_check_timeouts(void) {
             }
         }
     }
+
+    assert(g_queue.pending_count == command_queue_count_active());
 }
 
 // T021: Free command slot
@@ -104,6 +121,17 @@ void command_queue_free(uint8_t seq_id) {
         cmd->active = false;
         g_queue.pending_count--;
     }
+    assert(g_queue.pending_count == command_queue_count_active());
+}
+
+// Cancel all pending commands without invoking their callbacks (used by
+// auxbeam_light_deinit(), per its documented contract).
+void command_queue_cancel_all(void) {
+    for (int i = 0; i < MAX_PENDING_COMMANDS; i++) {
+        g_queue.slots[i].active = false;
+    }
+    g_queue.pending_count = 0;
+    assert(g_queue.pending_count == command_queue_count_active());
 }
 
 uint32_t command_queue_get_count(void) {

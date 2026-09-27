@@ -15,6 +15,7 @@ pending_command_t* command_queue_allocate(uint8_t *seq_id_out);
 pending_command_t* command_queue_find(uint8_t seq_id);
 void command_queue_check_timeouts(void);
 void command_queue_free(uint8_t seq_id);
+void command_queue_cancel_all(void);
 uint32_t command_queue_get_count(void);
 
 #endif /* COMMAND_QUEUE_H */

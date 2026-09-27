@@ -9,7 +9,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
-#include <stdlib.h>
 #include <string.h>
 
 static const char *TAG = "auxbeam_light";
@@ -19,7 +18,17 @@ struct auxbeam_context {
     hal_uart_handle_t *uart_handle;
     uint32_t default_timeout_ms;
     bool initialized;
+    // Accumulates bytes across process() calls: an 11-byte frame takes ~46ms
+    // to arrive at 2400 baud, so a single non-blocking read at typical
+    // polling intervals (e.g. 10ms) will usually see a partial frame.
+    uint8_t rx_buf[sizeof(auxbeam_message_t)];
+    size_t rx_len;
 };
+
+// Single static instance: the library supports exactly one active context
+// at a time (the command queue is likewise a single global — see
+// command_queue.c), so this is statically allocated rather than malloc'd.
+static auxbeam_context_t g_context;
 
 // T024: Initialize library
 auxbeam_error_t auxbeam_light_init(const auxbeam_config_t *config, auxbeam_context_t **ctx_out) {
@@ -27,14 +36,12 @@ auxbeam_error_t auxbeam_light_init(const auxbeam_config_t *config, auxbeam_conte
         return AUXBEAM_ERR_INVALID_PARAM;
     }
 
-    // Allocate context
-    auxbeam_context_t *ctx = (auxbeam_context_t *)malloc(sizeof(auxbeam_context_t));
-    if (ctx == NULL) {
-        return AUXBEAM_ERR_UART;
+    if (g_context.initialized) {
+        return AUXBEAM_ERR_ALREADY_INITIALIZED;
     }
 
-    memset(ctx, 0, sizeof(auxbeam_context_t));
-    ctx->default_timeout_ms = config->default_timeout_ms;
+    memset(&g_context, 0, sizeof(g_context));
+    g_context.default_timeout_ms = config->default_timeout_ms;
 
     // Initialize UART HAL
     hal_uart_config_t uart_config = {
@@ -44,16 +51,15 @@ auxbeam_error_t auxbeam_light_init(const auxbeam_config_t *config, auxbeam_conte
         .baud_rate = AUXBEAM_UART_BAUD_RATE
     };
 
-    if (hal_uart_init(&uart_config, &ctx->uart_handle) != 0) {
-        free(ctx);
+    if (hal_uart_init(&uart_config, &g_context.uart_handle) != 0) {
         return AUXBEAM_ERR_UART;
     }
 
     // Initialize command queue
     command_queue_init();
 
-    ctx->initialized = true;
-    *ctx_out = ctx;
+    g_context.initialized = true;
+    *ctx_out = &g_context;
 
     ESP_LOGI(TAG, "Library initialized (UART%d, TX:%d, RX:%d, timeout:%ums)",
              config->uart_num, config->tx_pin, config->rx_pin, config->default_timeout_ms);
@@ -63,16 +69,22 @@ auxbeam_error_t auxbeam_light_init(const auxbeam_config_t *config, auxbeam_conte
 
 // T025: Deinitialize library
 auxbeam_error_t auxbeam_light_deinit(auxbeam_context_t *ctx) {
-    if (ctx == NULL) {
+    if (ctx == NULL || ctx != &g_context || !ctx->initialized) {
         return AUXBEAM_ERR_INVALID_PARAM;
     }
+
+    // Cancel any pending commands (no callbacks invoked) before tearing down.
+    uint32_t dropped = command_queue_get_count();
+    if (dropped > 0) {
+        ESP_LOGW(TAG, "Deinit with %u pending command(s); cancelling without callback", dropped);
+    }
+    command_queue_cancel_all();
 
     if (ctx->uart_handle != NULL) {
         hal_uart_deinit(ctx->uart_handle);
     }
 
-    ctx->initialized = false;
-    free(ctx);
+    memset(&g_context, 0, sizeof(g_context));
 
     ESP_LOGI(TAG, "Library deinitialized");
     return AUXBEAM_OK;
@@ -121,6 +133,7 @@ auxbeam_error_t auxbeam_light_set_output(
 
     auxbeam_message_t msg;
     light_protocol_encode_command(&msg, seq_id, states);
+    ESP_LOG_BUFFER_HEX_LEVEL(TAG, &msg, sizeof(msg), ESP_LOG_DEBUG);
 
     // T031: Send command via HAL
     int sent = hal_uart_send(ctx->uart_handle, (const uint8_t *)&msg, sizeof(msg));
@@ -148,11 +161,22 @@ auxbeam_error_t auxbeam_light_process(auxbeam_context_t *ctx) {
         return AUXBEAM_ERR_NOT_INITIALIZED;
     }
 
-    // T033: Try to receive ACK message
-    auxbeam_message_t msg;
-    int received = hal_uart_receive(ctx->uart_handle, (uint8_t *)&msg, sizeof(msg), 0);
+    // T033: Top up the frame buffer with whatever bytes are available now.
+    // A full frame may take several process() calls to arrive.
+    size_t remaining = sizeof(ctx->rx_buf) - ctx->rx_len;
+    if (remaining > 0) {
+        int received = hal_uart_receive(ctx->uart_handle, ctx->rx_buf + ctx->rx_len, remaining, 0);
+        if (received > 0) {
+            ctx->rx_len += (size_t)received;
+        }
+    }
 
-    if (received == sizeof(msg)) {
+    if (ctx->rx_len == sizeof(ctx->rx_buf)) {
+        auxbeam_message_t msg;
+        memcpy(&msg, ctx->rx_buf, sizeof(msg));
+        ctx->rx_len = 0;  // Frame consumed; start accumulating the next one.
+        ESP_LOG_BUFFER_HEX_LEVEL(TAG, &msg, sizeof(msg), ESP_LOG_DEBUG);
+
         // T034: Validate checksum
         uint8_t seq_id;
         if (!light_protocol_decode_ack(&msg, &seq_id)) {
@@ -223,6 +247,7 @@ auxbeam_error_t auxbeam_light_set_multiple(
     // Build command message with all output states
     auxbeam_message_t msg;
     light_protocol_encode_command(&msg, seq_id, states);
+    ESP_LOG_BUFFER_HEX_LEVEL(TAG, &msg, sizeof(msg), ESP_LOG_DEBUG);
 
     // Send command
     int sent = hal_uart_send(ctx->uart_handle, (const uint8_t *)&msg, sizeof(msg));
