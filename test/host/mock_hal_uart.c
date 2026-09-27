@@ -4,6 +4,8 @@
  */
 #include "hal_uart.h"
 #include "mock_hal_uart.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <string.h>
 
 #define MOCK_RX_BUF_SIZE 256
@@ -20,6 +22,7 @@ static size_t g_rx_pos = 0;
 static uint8_t g_tx_buf[MOCK_TX_BUF_SIZE];
 static size_t g_tx_len = 0;
 static uint32_t g_clock_ms = 0;
+static void *g_current_task = (void *)0x1;  // fixed non-NULL sentinel "task"
 
 int hal_uart_init(const hal_uart_config_t *config, hal_uart_handle_t **handle_out) {
     if (config == NULL || handle_out == NULL) {
@@ -65,6 +68,7 @@ void mock_hal_uart_reset(void) {
     g_rx_pos = 0;
     g_tx_len = 0;
     g_clock_ms = 0;
+    g_current_task = (void *)0x1;
 }
 
 void mock_hal_uart_push_rx(const uint8_t *data, size_t len) {
@@ -102,6 +106,14 @@ void mock_clock_advance_ms(uint32_t delta_ms) {
 
 // Backs the freertos/task.h stub's xTaskGetTickCount() (portTICK_PERIOD_MS
 // is 1 in the stub, so ticks and milliseconds are the same unit here).
-uint32_t xTaskGetTickCount(void) {
+TickType_t xTaskGetTickCount(void) {
     return g_clock_ms;
+}
+
+void mock_task_set_current(void *handle) {
+    g_current_task = handle;
+}
+
+TaskHandle_t xTaskGetCurrentTaskHandle(void) {
+    return g_current_task;
 }

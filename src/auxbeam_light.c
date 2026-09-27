@@ -23,12 +23,21 @@ struct auxbeam_context {
     // polling intervals (e.g. 10ms) will usually see a partial frame.
     uint8_t rx_buf[sizeof(auxbeam_message_t)];
     size_t rx_len;
+    // The task that called init(). There is no locking anywhere in this
+    // library (see the @warning in auxbeam_light.h) -- every other API
+    // function checks this and refuses to run on any other task, rather
+    // than silently racing on g_context/g_queue.
+    TaskHandle_t owner_task;
 };
 
 // Single static instance: the library supports exactly one active context
 // at a time (the command queue is likewise a single global — see
 // command_queue.c), so this is statically allocated rather than malloc'd.
 static auxbeam_context_t g_context;
+
+static bool is_owner_task(const auxbeam_context_t *ctx) {
+    return xTaskGetCurrentTaskHandle() == ctx->owner_task;
+}
 
 // T024: Initialize library
 auxbeam_error_t auxbeam_light_init(const auxbeam_config_t *config, auxbeam_context_t **ctx_out) {
@@ -58,6 +67,7 @@ auxbeam_error_t auxbeam_light_init(const auxbeam_config_t *config, auxbeam_conte
     // Initialize command queue
     command_queue_init();
 
+    g_context.owner_task = xTaskGetCurrentTaskHandle();
     g_context.initialized = true;
     *ctx_out = &g_context;
 
@@ -71,6 +81,9 @@ auxbeam_error_t auxbeam_light_init(const auxbeam_config_t *config, auxbeam_conte
 auxbeam_error_t auxbeam_light_deinit(auxbeam_context_t *ctx) {
     if (ctx == NULL || ctx != &g_context || !ctx->initialized) {
         return AUXBEAM_ERR_INVALID_PARAM;
+    }
+    if (!is_owner_task(ctx)) {
+        return AUXBEAM_ERR_WRONG_TASK;
     }
 
     // Cancel any pending commands (no callbacks invoked) before tearing down.
@@ -102,6 +115,9 @@ auxbeam_error_t auxbeam_light_set_output(
     // T027: Parameter validation
     if (ctx == NULL || !ctx->initialized) {
         return AUXBEAM_ERR_NOT_INITIALIZED;
+    }
+    if (!is_owner_task(ctx)) {
+        return AUXBEAM_ERR_WRONG_TASK;
     }
 
     if (output_index >= AUXBEAM_NUM_OUTPUTS) {
@@ -159,6 +175,9 @@ auxbeam_error_t auxbeam_light_set_output(
 auxbeam_error_t auxbeam_light_process(auxbeam_context_t *ctx) {
     if (ctx == NULL || !ctx->initialized) {
         return AUXBEAM_ERR_NOT_INITIALIZED;
+    }
+    if (!is_owner_task(ctx)) {
+        return AUXBEAM_ERR_WRONG_TASK;
     }
 
     // T033: Top up the frame buffer with whatever bytes are available now.
@@ -219,6 +238,9 @@ auxbeam_error_t auxbeam_light_set_multiple(
     if (ctx == NULL || !ctx->initialized) {
         return AUXBEAM_ERR_NOT_INITIALIZED;
     }
+    if (!is_owner_task(ctx)) {
+        return AUXBEAM_ERR_WRONG_TASK;
+    }
 
     if (states == NULL) {
         return AUXBEAM_ERR_INVALID_PARAM;
@@ -274,6 +296,9 @@ auxbeam_error_t auxbeam_light_set_timeout(auxbeam_context_t *ctx, uint32_t timeo
     if (ctx == NULL || !ctx->initialized) {
         return AUXBEAM_ERR_NOT_INITIALIZED;
     }
+    if (!is_owner_task(ctx)) {
+        return AUXBEAM_ERR_WRONG_TASK;
+    }
 
     if (timeout_ms == 0) {
         return AUXBEAM_ERR_INVALID_PARAM;
@@ -286,6 +311,9 @@ auxbeam_error_t auxbeam_light_set_timeout(auxbeam_context_t *ctx, uint32_t timeo
 auxbeam_error_t auxbeam_light_get_pending_count(auxbeam_context_t *ctx, uint32_t *count_out) {
     if (ctx == NULL || !ctx->initialized || count_out == NULL) {
         return AUXBEAM_ERR_INVALID_PARAM;
+    }
+    if (!is_owner_task(ctx)) {
+        return AUXBEAM_ERR_WRONG_TASK;
     }
 
     *count_out = command_queue_get_count();

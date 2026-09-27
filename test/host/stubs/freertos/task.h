@@ -10,6 +10,9 @@
 
 #include "FreeRTOS.h"
 
+typedef void *TaskHandle_t;
+
 TickType_t xTaskGetTickCount(void);
+TaskHandle_t xTaskGetCurrentTaskHandle(void);
 
 #endif /* HOST_STUB_FREERTOS_TASK_H */

@@ -204,6 +204,32 @@ static void test_deinit_cancels_without_callback(void) {
     TEST_CHECK_EQ(g_timeout_seen, 0);
 }
 
+// The library has no internal locking (see auxbeam_light.h's @warning):
+// every function other than init() must reject calls from a task other
+// than the one that called init(), rather than racing on shared state.
+static void test_wrong_task_rejected(void) {
+    reset_all();
+    auxbeam_context_t *ctx = NULL;
+    auxbeam_config_t config = {.uart_num = 1, .tx_pin = 17, .rx_pin = 16, .default_timeout_ms = 500};
+    void *owner_task = (void *)0x1;  // matches mock_hal_uart_reset()'s default
+    mock_task_set_current(owner_task);
+    TEST_CHECK_EQ(auxbeam_light_init(&config, &ctx), AUXBEAM_OK);
+
+    void *other_task = (void *)0x2;
+    mock_task_set_current(other_task);
+    TEST_CHECK_EQ(auxbeam_light_set_output(ctx, 0, AUXBEAM_OUTPUT_ON, on_ack, on_timeout, NULL), AUXBEAM_ERR_WRONG_TASK);
+    TEST_CHECK_EQ(mock_hal_uart_tx_len(), 0);  // nothing was actually sent
+    TEST_CHECK_EQ(auxbeam_light_process(ctx), AUXBEAM_ERR_WRONG_TASK);
+    uint32_t pending = 0;
+    TEST_CHECK_EQ(auxbeam_light_get_pending_count(ctx, &pending), AUXBEAM_ERR_WRONG_TASK);
+    TEST_CHECK_EQ(auxbeam_light_deinit(ctx), AUXBEAM_ERR_WRONG_TASK);
+
+    // The owning task can still use it normally.
+    mock_task_set_current(owner_task);
+    TEST_CHECK_EQ(auxbeam_light_set_output(ctx, 0, AUXBEAM_OUTPUT_ON, on_ack, on_timeout, NULL), AUXBEAM_OK);
+    TEST_CHECK_EQ(auxbeam_light_deinit(ctx), AUXBEAM_OK);
+}
+
 void run_integration_tests(void) {
     test_ack_split_across_process_calls();
     test_timeout_path();
@@ -212,4 +238,5 @@ void run_integration_tests(void) {
     test_set_multiple();
     test_queue_full_via_api();
     test_deinit_cancels_without_callback();
+    test_wrong_task_rejected();
 }

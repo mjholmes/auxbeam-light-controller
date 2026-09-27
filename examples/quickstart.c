@@ -5,6 +5,14 @@
  * Unlike basic_example.c (which just cycles through output patterns), this
  * demonstrates the "Common Patterns" from the quickstart guide: checking
  * queue capacity before sending, and retrying a command on timeout.
+ *
+ * auxbeam_light has no internal locking (see auxbeam_light.h's @warning):
+ * every call, including auxbeam_light_process(), must come from the single
+ * task that called auxbeam_light_init(). So everything here -- init,
+ * sending, waiting for queue room, and processing ACKs/timeouts -- runs in
+ * one task's loop. In particular, send_when_queue_has_room()'s wait loop
+ * calls auxbeam_light_process() itself: nothing else will ever drain the
+ * queue while this task is busy waiting.
  */
 
 #include "auxbeam_light.h"
@@ -60,61 +68,67 @@ static void send_with_retry(uint8_t output_index, auxbeam_output_state_t state) 
 }
 
 // Pattern 2 (quickstart.md "Check Queue Before Sending"): back off instead of
-// hitting AUXBEAM_ERR_QUEUE_FULL when commands are already in flight.
+// hitting AUXBEAM_ERR_QUEUE_FULL when commands are already in flight. Must
+// keep calling process() while waiting, since this task is the only thing
+// that will ever drain the queue.
 static void send_when_queue_has_room(uint8_t output_index, auxbeam_output_state_t state) {
     uint32_t pending = 0;
     auxbeam_light_get_pending_count(g_light_ctx, &pending);
 
     while (pending >= AUXBEAM_MAX_PENDING_COMMANDS) {
         ESP_LOGW(TAG, "Queue full (%u pending), waiting...", pending);
-        vTaskDelay(pdMS_TO_TICKS(50));
+        auxbeam_light_process(g_light_ctx);
+        vTaskDelay(pdMS_TO_TICKS(10));
         auxbeam_light_get_pending_count(g_light_ctx, &pending);
     }
 
     send_with_retry(output_index, state);
 }
 
-// Light RX task - processes acknowledgments (quickstart.md Step 5)
-static void light_rx_task(void *param) {
-    (void)param;
-    while (1) {
+// Runs auxbeam_light_process() every ~10ms for the given duration, so ACKs/
+// timeouts keep getting handled while the demo "waits" between phases.
+static void process_for(uint32_t duration_ms) {
+    for (uint32_t elapsed = 0; elapsed < duration_ms; elapsed += 10) {
         auxbeam_light_process(g_light_ctx);
-        vTaskDelay(pdMS_TO_TICKS(10));  // 10ms polling interval
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
-static void demo_task(void *param) {
-    (void)param;
-    vTaskDelay(pdMS_TO_TICKS(1000));  // Wait for initialization
+// The single task that owns the library: it calls init() itself, then
+// sends demo commands and processes ACKs/timeouts in its own loop.
+static void light_controller_task(void *param) {
+    auxbeam_config_t *config = (auxbeam_config_t *)param;
 
-    while (1) {
-        for (uint8_t output = 0; output < AUXBEAM_NUM_OUTPUTS; output++) {
-            send_when_queue_has_room(output, AUXBEAM_OUTPUT_ON);
-        }
-        vTaskDelay(pdMS_TO_TICKS(2000));
-
-        for (uint8_t output = 0; output < AUXBEAM_NUM_OUTPUTS; output++) {
-            send_when_queue_has_room(output, AUXBEAM_OUTPUT_OFF);
-        }
-        vTaskDelay(pdMS_TO_TICKS(2000));
-    }
-}
-
-void app_main(void) {
-    auxbeam_config_t config = {
-        .uart_num = UART_NUM_1,
-        .tx_pin = 17,  // GPIO 17
-        .rx_pin = 16,  // GPIO 16
-        .default_timeout_ms = 500
-    };
-
-    auxbeam_error_t err = auxbeam_light_init(&config, &g_light_ctx);
+    auxbeam_error_t err = auxbeam_light_init(config, &g_light_ctx);
     if (err != AUXBEAM_OK) {
         ESP_LOGE(TAG, "Init failed: %d", err);
         return;
     }
     ESP_LOGI(TAG, "Light controller initialized");
 
-    xTaskCreate(light_rx_task, "light_rx", 2048, NULL, 5, NULL);
-    xTaskCreate(demo_task, "demo", 2048, NULL, 5, NULL);
+    while (1) {
+        for (uint8_t output = 0; output < AUXBEAM_NUM_OUTPUTS; output++) {
+            send_when_queue_has_room(output, AUXBEAM_OUTPUT_ON);
+        }
+        process_for(2000);
+
+        for (uint8_t output = 0; output < AUXBEAM_NUM_OUTPUTS; output++) {
+            send_when_queue_has_room(output, AUXBEAM_OUTPUT_OFF);
+        }
+        process_for(2000);
+    }
+}
+
+static auxbeam_config_t g_config = {
+    .uart_num = UART_NUM_1,
+    .tx_pin = 17,  // GPIO 17
+    .rx_pin = 16,  // GPIO 16
+    .default_timeout_ms = 500
+};
+
+void app_main(void) {
+    // Note: app_main itself never calls auxbeam_light_init() -- the task
+    // that will make all the library calls must be the one that does, so
+    // init() happens inside light_controller_task instead.
+    xTaskCreate(light_controller_task, "light_ctrl", 2048, &g_config, 5, NULL);
 }

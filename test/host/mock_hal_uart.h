@@ -28,4 +28,10 @@ void mock_hal_uart_clear_tx(void);
 void mock_clock_set_ms(uint32_t ms);
 void mock_clock_advance_ms(uint32_t delta_ms);
 
+/** Mock "current task" backing xTaskGetCurrentTaskHandle(), so the
+ *  owner-task guard is testable without real FreeRTOS tasks. Defaults to
+ *  a fixed non-NULL sentinel; call with a different value to simulate a
+ *  call arriving from a different task. */
+void mock_task_set_current(void *handle);
+
 #endif /* MOCK_HAL_UART_H */

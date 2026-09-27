@@ -4,6 +4,18 @@
  *
  * This is the main header file for controlling an RA60 light controller
  * via 2400 baud UART on ESP32.
+ *
+ * @warning Not thread-safe. All API calls -- including auxbeam_light_process()
+ * -- must be made from a single "owning" FreeRTOS task (whichever task calls
+ * auxbeam_light_init()). There is no internal locking: the command queue and
+ * context are plain static state. If other parts of the application (a UI
+ * task, a CAN bus listener, etc.) need to control lights, they must send a
+ * request to the owning task via a FreeRTOS queue or similar IPC -- they must
+ * not call these functions directly. Calling from a different task than the
+ * one that initialized the library returns AUXBEAM_ERR_WRONG_TASK.
+ *
+ * @warning None of these functions are ISR-safe. Do not call any of them
+ * from interrupt context.
  */
 
 #ifndef AUXBEAM_LIGHT_H
@@ -29,6 +41,7 @@ typedef enum {
     AUXBEAM_ERR_TIMEOUT = -5,          /**< Command timeout */
     AUXBEAM_ERR_BAD_CHECKSUM = -6,     /**< Checksum validation failed */
     AUXBEAM_ERR_ALREADY_INITIALIZED = -7, /**< init() called while already initialized */
+    AUXBEAM_ERR_WRONG_TASK = -8,       /**< Called from a task other than the one that called init() */
 } auxbeam_error_t;
 
 /**
