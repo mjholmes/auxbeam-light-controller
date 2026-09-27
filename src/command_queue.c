@@ -11,21 +11,10 @@
 
 #define MAX_PENDING_COMMANDS 4
 
-// T016: Pending command structure
-struct pending_command {
-    uint8_t seq_id;
-    auxbeam_output_state_t outputs[6];
-    uint32_t send_time_ms;
-    uint32_t timeout_ms;
-    auxbeam_ack_callback_t ack_cb;
-    auxbeam_timeout_callback_t timeout_cb;
-    void *user_data;
-    bool active;
-};
-
-// T017: Command queue structure
+// T017: Command queue structure (T016's pending_command_t is defined in
+// command_queue.h -- see the comment there for why).
 typedef struct {
-    struct pending_command slots[MAX_PENDING_COMMANDS];
+    pending_command_t slots[MAX_PENDING_COMMANDS];
     uint8_t next_seq_id;
     uint32_t pending_count;
 } command_queue_t;
