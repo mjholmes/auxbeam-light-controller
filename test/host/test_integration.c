@@ -114,7 +114,13 @@ static void test_bad_checksum_ack_rejected(void) {
     uint8_t good_ack[11];
     build_ack_frame(0, good_ack);
     mock_hal_uart_push_rx(good_ack, sizeof(good_ack));
-    auxbeam_light_process(ctx);
+    // The corrupted frame was structurally well-formed (only its checksum
+    // was wrong), so the byte-slip resync in process() has to shift past
+    // its remaining stale bytes one at a time before it realigns on this
+    // new frame -- that costs a few extra polls, not just one.
+    for (size_t i = 0; i < sizeof(good_ack) && g_ack_seen == 0; i++) {
+        auxbeam_light_process(ctx);
+    }
     TEST_CHECK_EQ(g_ack_seen, 1);
 
     auxbeam_light_deinit(ctx);
@@ -230,6 +236,83 @@ static void test_wrong_task_rejected(void) {
     TEST_CHECK_EQ(auxbeam_light_deinit(ctx), AUXBEAM_OK);
 }
 
+// L-1 regression: a single stray byte on the wire must not permanently
+// break frame decoding. Reproduces an external review's exact repro: one
+// stray byte, then 5 valid ACKs for 5 distinct commands -- all 5 must
+// eventually match instead of 0/5.
+static void test_resync_after_stray_byte(void) {
+    reset_all();
+    auxbeam_context_t *ctx = NULL;
+    auxbeam_config_t config = {.uart_num = 1, .tx_pin = 17, .rx_pin = 16, .default_timeout_ms = 500};
+    auxbeam_light_init(&config, &ctx);
+
+    uint8_t stray = 0x42;
+    mock_hal_uart_push_rx(&stray, 1);
+    auxbeam_light_process(ctx);  // buffers the stray byte; no full frame yet
+
+    for (uint8_t i = 0; i < 5; i++) {
+        TEST_CHECK_EQ(auxbeam_light_set_output(ctx, 0, AUXBEAM_OUTPUT_ON, on_ack, on_timeout, NULL), AUXBEAM_OK);
+
+        uint8_t ack[11];
+        build_ack_frame(i, ack);
+        mock_hal_uart_push_rx(ack, sizeof(ack));
+
+        // Resync costs a few extra polls (bounded by the frame size) the
+        // first time, to shift past the stray byte; give it margin.
+        for (int poll = 0; poll < 15 && g_ack_seen < (int)(i + 1); poll++) {
+            auxbeam_light_process(ctx);
+        }
+        TEST_CHECK_EQ(g_ack_seen, (int)(i + 1));
+        TEST_CHECK_EQ(g_last_acked_seq, i);
+    }
+
+    auxbeam_light_deinit(ctx);
+}
+
+static auxbeam_context_t *g_retry_test_ctx;
+static auxbeam_error_t g_retry_result;
+
+static void on_timeout_retry_via_api(uint8_t seq_id, auxbeam_error_t error, void *user_data) {
+    (void)seq_id;
+    (void)error;
+    (void)user_data;
+    g_timeout_seen++;
+    // L-2 regression: this reentrant retry must not see a stale
+    // AUXBEAM_ERR_QUEUE_FULL caused by this command's own slot not being
+    // freed yet -- auxbeam_light.h documents retrying from here as safe.
+    g_retry_result = auxbeam_light_set_output(g_retry_test_ctx, 0, AUXBEAM_OUTPUT_ON, on_ack, on_timeout, NULL);
+}
+
+static void test_retry_from_timeout_callback_when_queue_full(void) {
+    reset_all();
+    auxbeam_context_t *ctx = NULL;
+    auxbeam_config_t config = {.uart_num = 1, .tx_pin = 17, .rx_pin = 16, .default_timeout_ms = 500};
+    auxbeam_light_init(&config, &ctx);
+    g_retry_test_ctx = ctx;
+    g_retry_result = AUXBEAM_ERR_QUEUE_FULL;  // sentinel: must change below
+
+    // Three commands with a long timeout that won't expire in this test...
+    auxbeam_light_set_timeout(ctx, 10000);
+    for (int i = 0; i < 3; i++) {
+        TEST_CHECK_EQ(auxbeam_light_set_output(ctx, 0, AUXBEAM_OUTPUT_ON, on_ack, on_timeout, NULL), AUXBEAM_OK);
+    }
+    // ...and a 4th with a short timeout, so it's the only one that expires.
+    auxbeam_light_set_timeout(ctx, 100);
+    TEST_CHECK_EQ(auxbeam_light_set_output(ctx, 0, AUXBEAM_OUTPUT_ON, on_ack, on_timeout_retry_via_api, NULL), AUXBEAM_OK);
+
+    uint32_t pending = 0;
+    auxbeam_light_get_pending_count(ctx, &pending);
+    TEST_CHECK_EQ(pending, 4);
+
+    mock_clock_advance_ms(200);
+    auxbeam_light_process(ctx);
+
+    TEST_CHECK_EQ(g_timeout_seen, 1);  // only the 4th command timed out
+    TEST_CHECK_EQ(g_retry_result, AUXBEAM_OK);  // not AUXBEAM_ERR_QUEUE_FULL
+
+    auxbeam_light_deinit(ctx);
+}
+
 void run_integration_tests(void) {
     test_ack_split_across_process_calls();
     test_timeout_path();
@@ -239,4 +322,6 @@ void run_integration_tests(void) {
     test_queue_full_via_api();
     test_deinit_cancels_without_callback();
     test_wrong_task_rejected();
+    test_resync_after_stray_byte();
+    test_retry_from_timeout_callback_when_queue_full();
 }

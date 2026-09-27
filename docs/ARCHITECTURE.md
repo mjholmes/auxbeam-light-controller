@@ -79,9 +79,19 @@ At 2400 baud an 11-byte frame takes ~46ms to arrive (see
 only part of a frame. The context carries a small `rx_buf`/`rx_len` pair
 that accumulates bytes across calls to `process()`; only once a full 11
 bytes have arrived does the library attempt to decode and checksum-validate
-the frame. This assumes bytes arrive in order without loss (true for a
-direct wired UART link); it does not attempt resynchronization after a
-dropped or corrupted byte mid-frame.
+the frame.
+
+If that decode fails -- wrong message/command type, or a bad checksum --
+the window may simply be misaligned (a stray or dropped byte shifted
+everything by one), not necessarily garbage. Rather than discard the whole
+11 bytes and stay at the same wrong offset forever, `process()` drops only
+the oldest byte and retries at the next alignment on the following call.
+Since every possible byte offset gets tried this way, a one-byte desync
+self-heals within at most ~10 extra polls (about 100ms at the documented
+10ms interval) instead of permanently breaking decoding -- see
+`test_resync_after_stray_byte()` in `test_integration.c` for the regression
+test (this was a real, externally-reported bug: a single stray byte broke
+the link permanently until reinit).
 
 ## Error handling
 
@@ -94,6 +104,16 @@ dropped or corrupted byte mid-frame.
 - `auxbeam_light_deinit()` cancels any still-pending commands without
   invoking their callbacks -- an explicit, documented behavior, not a
   side effect.
+- Both callback sites (`ack_cb` on a matched ACK, `timeout_cb` on
+  expiry) free the command's queue slot *before* invoking the callback,
+  specifically so that a retry from inside `timeout_cb` -- the pattern
+  `auxbeam_light.h` documents as safe, and `examples/quickstart.c`
+  demonstrates -- sees an accurate queue count rather than one still
+  counting its own about-to-be-freed slot. Getting this ordering backwards
+  was a real, externally-reported bug: with 4 commands in flight, retrying
+  from the timing-out one's own callback would incorrectly fail with
+  `AUXBEAM_ERR_QUEUE_FULL`. See `test_retry_from_timeout_callback_when_queue_full()`
+  in `test_integration.c`.
 - Debug builds assert that the queue's `pending_count` always matches its
   actual active-slot count, catching queue-management bugs immediately
   rather than letting `pending_count` silently drift.
@@ -140,5 +160,3 @@ size.
 - `test/target/` (hardware-in-loop tests against real ESP32 + RA60
   hardware) is not implemented.
 - Single controller instance only -- see "Single-instance design" above.
-- No resynchronization after a corrupted/dropped byte mid-frame -- see
-  "Frame reassembly" above.

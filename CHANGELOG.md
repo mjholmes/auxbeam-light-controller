@@ -4,6 +4,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/) once tagged
 releases begin.
 
+## [Unreleased]
+
+### Fixed
+- **L-1**: a single stray or dropped byte on the wire would permanently
+  desynchronize `process()`'s frame decoding -- reported and reproduced by
+  an external review (5 valid ACKs sent after one stray byte matched 0 of
+  5). `process()` now byte-slips one byte at a time and retries when a
+  full 11-byte window fails to decode, instead of discarding the whole
+  window and staying at the same wrong offset forever. Self-heals within
+  ~10 extra polls of any single-byte desync.
+- **L-2**: retrying a command from inside its own `timeout_cb` -- the
+  pattern `auxbeam_light.h` documents as safe and `examples/quickstart.c`
+  demonstrates -- could fail with `AUXBEAM_ERR_QUEUE_FULL` when 4 commands
+  were already in flight, because both callback sites (`ack_cb` and
+  `timeout_cb`) freed their queue slot *after* invoking the callback. Now
+  freed before, so a reentrant retry sees an accurate queue count.
+
 ## [0.1.0] - 2026-09-27
 
 Initial standalone extraction from the `auxbeam-serial` application repo's

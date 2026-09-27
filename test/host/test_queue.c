@@ -136,10 +136,63 @@ static void test_cancel_all_no_callbacks(void) {
     TEST_CHECK_EQ(g_timeout_calls, 0);
 }
 
+static pending_command_t *g_reentrant_alloc_result;
+static bool g_reentrant_alloc_attempted;
+
+static void reentrant_retry_timeout_cb(uint8_t seq_id, auxbeam_error_t error, void *user_data) {
+    (void)seq_id;
+    (void)error;
+    (void)user_data;
+    g_timeout_calls++;
+    g_reentrant_alloc_attempted = true;
+    uint8_t new_seq_id;
+    // This is the L-2 regression: at the point this callback runs, the
+    // slot that just timed out must already be free, so this reentrant
+    // allocate (standing in for a retry via set_output()) must succeed
+    // even though all 4 slots were in use a moment ago.
+    g_reentrant_alloc_result = command_queue_allocate(&new_seq_id);
+}
+
+static void test_timeout_callback_can_reentrantly_allocate(void) {
+    command_queue_init();
+    reset_counters();
+    g_reentrant_alloc_result = NULL;
+    g_reentrant_alloc_attempted = false;
+
+    // Fill all 4 slots; only slot 0 is due to expire at clock=100.
+    for (int i = 0; i < 4; i++) {
+        uint8_t seq_id;
+        pending_command_t *cmd = command_queue_allocate(&seq_id);
+        TEST_CHECK(cmd != NULL);
+        cmd->send_time_ms = 0;
+        if (i == 0) {
+            cmd->timeout_ms = 100;
+            cmd->timeout_cb = reentrant_retry_timeout_cb;
+        } else {
+            cmd->timeout_ms = 10000;  // must not expire in this test
+            cmd->timeout_cb = timeout_cb;
+        }
+    }
+    TEST_CHECK_EQ(command_queue_get_count(), 4);
+
+    mock_clock_set_ms(100);
+    command_queue_check_timeouts();
+
+    TEST_CHECK(g_reentrant_alloc_attempted);
+    TEST_CHECK(g_reentrant_alloc_result != NULL);  // must not be QUEUE_FULL
+    TEST_CHECK_EQ(g_timeout_calls, 1);  // only slot 0 timed out
+    // Slot 0 was freed then immediately reclaimed by the reentrant
+    // allocate, so the count is back to 4, not 3.
+    TEST_CHECK_EQ(command_queue_get_count(), 4);
+
+    command_queue_cancel_all();
+}
+
 void run_queue_tests(void) {
     test_allocate_and_queue_full();
     test_seq_id_wraps();
     test_find_and_free();
     test_check_timeouts();
     test_cancel_all_no_callbacks();
+    test_timeout_callback_can_reentrantly_allocate();
 }

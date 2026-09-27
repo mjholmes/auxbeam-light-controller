@@ -88,14 +88,23 @@ void command_queue_check_timeouts(void) {
             uint32_t elapsed = current_time - cmd->send_time_ms;
 
             if (elapsed >= cmd->timeout_ms) {
-                // Timeout occurred
-                if (cmd->timeout_cb != NULL) {
-                    cmd->timeout_cb(cmd->seq_id, AUXBEAM_ERR_TIMEOUT, cmd->user_data);
-                }
+                // Capture what the callback needs before freeing the slot --
+                // the callback may reentrantly call command_queue_allocate()
+                // (via set_output()/set_multiple(), which is documented as
+                // safe to do from here), and that could immediately reuse
+                // this same slot's memory.
+                uint8_t seq_id = cmd->seq_id;
+                auxbeam_timeout_callback_t timeout_cb = cmd->timeout_cb;
+                void *user_data = cmd->user_data;
 
-                // Free the slot
+                // Free the slot *before* invoking the callback, so a retry
+                // from inside the callback doesn't see a stale QUEUE_FULL.
                 cmd->active = false;
                 g_queue.pending_count--;
+
+                if (timeout_cb != NULL) {
+                    timeout_cb(seq_id, AUXBEAM_ERR_TIMEOUT, user_data);
+                }
             }
         }
     }

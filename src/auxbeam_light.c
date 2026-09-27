@@ -193,28 +193,43 @@ auxbeam_error_t auxbeam_light_process(auxbeam_context_t *ctx) {
     if (ctx->rx_len == sizeof(ctx->rx_buf)) {
         auxbeam_message_t msg;
         memcpy(&msg, ctx->rx_buf, sizeof(msg));
-        ctx->rx_len = 0;  // Frame consumed; start accumulating the next one.
         ESP_LOG_BUFFER_HEX_LEVEL(TAG, &msg, sizeof(msg), ESP_LOG_DEBUG);
 
         // T034: Validate checksum
         uint8_t seq_id;
         if (!light_protocol_decode_ack(&msg, &seq_id)) {
-            ESP_LOGW(TAG, "Invalid ACK received (bad checksum or format)");
-            // Don't return error - continue processing
+            ESP_LOGW(TAG, "Invalid ACK received (bad checksum or format); resyncing");
+            // Framing may be offset by a stray/dropped byte rather than
+            // this genuinely being garbage -- drop only the oldest byte
+            // and retry at the next alignment, instead of discarding the
+            // whole window. Every possible offset gets tried this way, so
+            // a one-byte desync self-heals within ~10 more process() polls
+            // instead of permanently breaking decoding.
+            memmove(ctx->rx_buf, ctx->rx_buf + 1, sizeof(ctx->rx_buf) - 1);
+            ctx->rx_len = sizeof(ctx->rx_buf) - 1;
         } else {
+            ctx->rx_len = 0;  // Frame consumed; start accumulating the next one.
+
             // T035: Find pending command by sequence ID
             pending_command_t *pending = command_queue_find(seq_id);
 
             if (pending != NULL) {
-                // T036: Invoke acknowledgment callback
-                if (pending->ack_cb != NULL) {
-                    pending->ack_cb(seq_id, pending->user_data);
-                }
-
-                ESP_LOGD(TAG, "ACK received: seq_id=%d", seq_id);
+                // T036: Capture what the callback needs and free the slot
+                // *before* invoking it -- ack_cb could (even though it's
+                // not documented as supported) call back into the queue,
+                // and get_pending_count() should reflect the free
+                // immediately rather than being stale during the callback.
+                auxbeam_ack_callback_t ack_cb = pending->ack_cb;
+                void *user_data = pending->user_data;
 
                 // T037: Free pending command slot
                 command_queue_free(seq_id);
+
+                if (ack_cb != NULL) {
+                    ack_cb(seq_id, user_data);
+                }
+
+                ESP_LOGD(TAG, "ACK received: seq_id=%d", seq_id);
             } else {
                 ESP_LOGW(TAG, "ACK for unknown seq_id=%d", seq_id);
             }
