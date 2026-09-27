@@ -1,0 +1,14 @@
+version: "0.1.0"
+description: "ESP-IDF library for controlling an AuxBeam RA60 light controller (6 outputs: OFF/ON/STROBE) over a 2400 baud UART link, with acknowledgment/timeout handling."
+url: "https://github.com/mjholmes/auxbeam-light-controller"
+repository: "https://github.com/mjholmes/auxbeam-light-controller.git"
+documentation: "https://github.com/mjholmes/auxbeam-light-controller#readme"
+issues: "https://github.com/mjholmes/auxbeam-light-controller/issues"
+license: "Apache-2.0"
+targets:
+  - esp32
+  - esp32s2
+  - esp32s3
+  - esp32c3
+dependencies:
+  idf: ">=5.0"
