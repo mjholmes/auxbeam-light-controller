@@ -20,11 +20,11 @@ static void test_encode_command(void) {
     TEST_CHECK_EQ(msg.cmd_type, 0x08);
     TEST_CHECK_EQ(msg.unknown, 0x0C);
 
-    // Nibble packing per protocol.md: states[0] in the low nibble, states[1]
-    // in the high nibble of outputs[0], and so on.
-    TEST_CHECK_EQ(msg.outputs[0], (AUXBEAM_OUTPUT_ON & 0x0F) | ((AUXBEAM_OUTPUT_STROBE & 0x0F) << 4));
-    TEST_CHECK_EQ(msg.outputs[1], (AUXBEAM_OUTPUT_OFF & 0x0F) | ((AUXBEAM_OUTPUT_IGNORE & 0x0F) << 4));
-    TEST_CHECK_EQ(msg.outputs[2], (AUXBEAM_OUTPUT_IGNORE & 0x0F) | ((AUXBEAM_OUTPUT_IGNORE & 0x0F) << 4));
+    // Nibble packing per PROTOCOL.md: states[0] in the HIGH nibble, states[1]
+    // in the low nibble of outputs[0], and so on.
+    TEST_CHECK_EQ(msg.outputs[0], 0x15);   // ON, STROBE
+    TEST_CHECK_EQ(msg.outputs[1], 0x08);   // OFF, IGNORE
+    TEST_CHECK_EQ(msg.outputs[2], 0x88);   // IGNORE, IGNORE
     TEST_CHECK_EQ(msg.outputs[3], 0x00);
     TEST_CHECK_EQ(msg.padding[0], 0x00);
     TEST_CHECK_EQ(msg.padding[1], 0x00);
@@ -79,6 +79,33 @@ static void test_decode_ack_wrong_cmd_type(void) {
     TEST_CHECK(!light_protocol_decode_ack(&msg, NULL));
 }
 
+// L-6: output bytes must match frames captured from the RA60's own panel
+// (states 2/3/4 are the panel's momentary/strobe-off values, not in the enum).
+static void test_encode_matches_panel_captures(void) {
+    static const struct {
+        auxbeam_output_state_t states[6];
+        uint8_t outputs[4];
+    } cases[] = {
+        // CH1 PRESS: 38 88 88 ..
+        { { (auxbeam_output_state_t)3, AUXBEAM_OUTPUT_IGNORE, AUXBEAM_OUTPUT_IGNORE,
+            AUXBEAM_OUTPUT_IGNORE, AUXBEAM_OUTPUT_IGNORE, AUXBEAM_OUTPUT_IGNORE }, { 0x38, 0x88, 0x88, 0x00 } },
+        // CH2 PRESS: 83 88 88 ..
+        { { AUXBEAM_OUTPUT_IGNORE, (auxbeam_output_state_t)3, AUXBEAM_OUTPUT_IGNORE,
+            AUXBEAM_OUTPUT_IGNORE, AUXBEAM_OUTPUT_IGNORE, AUXBEAM_OUTPUT_IGNORE }, { 0x83, 0x88, 0x88, 0x00 } },
+        // CH4 ON (CH2/3 already on): 3500080C 21 11 00 00 2000 9B
+        { { (auxbeam_output_state_t)2, AUXBEAM_OUTPUT_ON, AUXBEAM_OUTPUT_ON,
+            AUXBEAM_OUTPUT_ON, AUXBEAM_OUTPUT_OFF, AUXBEAM_OUTPUT_OFF }, { 0x21, 0x11, 0x00, 0x00 } },
+        // (Prog RGBRGB) CH1 ON: 8800080C 12 40 24 00 2000 32
+        { { AUXBEAM_OUTPUT_ON, (auxbeam_output_state_t)2, (auxbeam_output_state_t)4,
+            AUXBEAM_OUTPUT_OFF, (auxbeam_output_state_t)2, (auxbeam_output_state_t)4 }, { 0x12, 0x40, 0x24, 0x00 } },
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        auxbeam_message_t msg;
+        light_protocol_encode_command(&msg, 0x00, cases[i].states);
+        TEST_CHECK_EQ(memcmp(msg.outputs, cases[i].outputs, 4), 0);
+    }
+}
+
 // L-5: a real RA60 acknowledges with cmd_type 0x18, not the documented 0xF8.
 // Frame captured on hardware in reply to command 00 00 08 0C 08 80 88 00 00 00 24.
 static void test_decode_ack_real_ra60_0x18(void) {
@@ -111,5 +138,6 @@ void run_protocol_tests(void) {
     test_decode_ack_wrong_msg_type();
     test_decode_ack_wrong_cmd_type();
     test_decode_ack_real_ra60_0x18();
+    test_encode_matches_panel_captures();
     test_decode_ack_cmd_type_high_nibble_ignored();
 }

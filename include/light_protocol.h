@@ -39,7 +39,7 @@ typedef struct {
     uint8_t msg_type;            /**< 0x00 = command, 0xFF = acknowledgment */
     uint8_t cmd_type;            /**< Low nibble 0x8. High nibble 0x0 in commands; in ACKs 0xF or 0x1 seen (not checked) */
     uint8_t unknown;             /**< 0x0C for output commands, 0x00 for ACKs */
-    uint8_t outputs[4];          /**< 8 nibbles packed (6 used, 2 unused) */
+    uint8_t outputs[4];          /**< 8 nibbles, output 1 in the high nibble of outputs[0] (6 used, 2 unused) */
     uint8_t padding[2];          /**< Always 0x00 */
     uint8_t checksum;            /**< Sum of bytes 0-9, modulo 256 */
 } __attribute__((packed)) auxbeam_message_t;

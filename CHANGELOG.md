@@ -7,6 +7,11 @@ releases begin.
 ## [Unreleased]
 
 ### Fixed
+- **L-6**: output nibbles were packed in the wrong order. The RA60 expects
+  the lower-numbered output in the HIGH nibble of each byte (panel capture:
+  CH1 press `38 88 88`, CH2 press `83 88 88`); the encoder put it in the low
+  nibble, so commands for outputs 2/3 drove outputs 1/4 instead.
+  `light_protocol_encode_command()` fixed; test vectors from panel captures.
 - **L-5**: acknowledgments from a real RA60 were all rejected. The decoder
   required byte 2 (`cmd_type`) to be exactly `0xF8`, but the RA60 replies
   with `0x18` (captured on hardware: `00 FF 18 00 08 80 88 00 00 00 27`), so

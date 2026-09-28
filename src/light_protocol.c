@@ -15,14 +15,16 @@ void light_protocol_encode_command(auxbeam_message_t *msg, uint8_t seq_id, const
     msg->cmd_type = 0x08;  // Output command
     msg->unknown = 0x0C;   // Output altering command marker
 
-    // Pack 6 output states into 4 bytes (2 nibbles per byte)
-    // outputs[0] = state 0 (low nibble) | state 1 (high nibble)
-    // outputs[1] = state 2 (low nibble) | state 3 (high nibble)
-    // outputs[2] = state 4 (low nibble) | state 5 (high nibble)
-    // outputs[3] = unused (0x00)
-    msg->outputs[0] = (states[0] & 0x0F) | ((states[1] & 0x0F) << 4);
-    msg->outputs[1] = (states[2] & 0x0F) | ((states[3] & 0x0F) << 4);
-    msg->outputs[2] = (states[4] & 0x0F) | ((states[5] & 0x0F) << 4);
+    // Pack 6 output states into 4 bytes, 2 nibbles per byte, lower-numbered
+    // output in the HIGH nibble (captured from the RA60 panel: CH1 press is
+    // 38 88 88 .., CH2 press is 83 88 88 ..).
+    // outputs[0] = state 0 (high nibble) | state 1 (low nibble)
+    // outputs[1] = state 2 (high nibble) | state 3 (low nibble)
+    // outputs[2] = state 4 (high nibble) | state 5 (low nibble)
+    // outputs[3] = outputs 7/8, not present on the RA60 (0x00, as the panel sends)
+    msg->outputs[0] = ((states[0] & 0x0F) << 4) | (states[1] & 0x0F);
+    msg->outputs[1] = ((states[2] & 0x0F) << 4) | (states[3] & 0x0F);
+    msg->outputs[2] = ((states[4] & 0x0F) << 4) | (states[5] & 0x0F);
     msg->outputs[3] = 0x00;
 
     // Padding bytes always 0x00

@@ -49,9 +49,19 @@ Computed over the first 10 bytes; stored in byte 10.
 
 ### Output state nibbles
 
-Bytes 4-7 pack 8 nibbles (2 outputs per byte), low nibble first:
-`outputs[0] = state[0] | (state[1] << 4)`, `outputs[1] = state[2] | (state[3] << 4)`,
-`outputs[2] = state[4] | (state[5] << 4)`, `outputs[3]` unused (`0x00`).
+Bytes 4-7 pack 8 nibbles (2 outputs per byte), **lower-numbered output in the
+high nibble**: `outputs[0] = (state[0] << 4) | state[1]`,
+`outputs[1] = (state[2] << 4) | state[3]`, `outputs[2] = (state[4] << 4) | state[5]`,
+`outputs[3]` = outputs 7/8, not present on the RA60 (`0x00`).
+
+Confirmed from captures of the RA60's own panel: pressing CH1 sends
+`38 88 88 ..`, CH2 `83 88 88 ..`, CH3 `88 38 88 ..`, CH4 `88 83 88 ..`.
+(An earlier version of this document and library had the order reversed,
+which drove outputs 1/4 when 2/3 were intended.)
+
+The panel sends `20 00` in bytes 8-9 of full-state commands and `88 88` in
+momentary press frames; the meaning is unknown. This library sends `00 00`,
+which the RA60 accepts and acknowledges.
 
 | Nibble value | Meaning |
 |---:|---|
