@@ -79,10 +79,37 @@ static void test_decode_ack_wrong_cmd_type(void) {
     TEST_CHECK(!light_protocol_decode_ack(&msg, NULL));
 }
 
+// L-5: a real RA60 acknowledges with cmd_type 0x18, not the documented 0xF8.
+// Frame captured on hardware in reply to command 00 00 08 0C 08 80 88 00 00 00 24.
+static void test_decode_ack_real_ra60_0x18(void) {
+    const uint8_t frame[11] = { 0x00, 0xFF, 0x18, 0x00, 0x08, 0x80, 0x88, 0x00, 0x00, 0x00, 0x27 };
+    auxbeam_message_t msg;
+    memcpy(&msg, frame, sizeof(msg));
+
+    uint8_t seq_id_out = 0xAA;
+    TEST_CHECK(light_protocol_decode_ack(&msg, &seq_id_out));
+    TEST_CHECK_EQ(seq_id_out, 0x00);
+}
+
+// Any high nibble is accepted; the low nibble must still be 0x8.
+static void test_decode_ack_cmd_type_high_nibble_ignored(void) {
+    auxbeam_message_t msg;
+    build_valid_ack(0x07, &msg);
+    msg.cmd_type = 0x38;
+    msg.checksum = light_protocol_calculate_checksum((const uint8_t *)&msg, 10);
+    TEST_CHECK(light_protocol_decode_ack(&msg, NULL));
+
+    msg.cmd_type = 0x19;  // low nibble not 0x8
+    msg.checksum = light_protocol_calculate_checksum((const uint8_t *)&msg, 10);
+    TEST_CHECK(!light_protocol_decode_ack(&msg, NULL));
+}
+
 void run_protocol_tests(void) {
     test_encode_command();
     test_decode_ack_valid();
     test_decode_ack_bad_checksum();
     test_decode_ack_wrong_msg_type();
     test_decode_ack_wrong_cmd_type();
+    test_decode_ack_real_ra60_0x18();
+    test_decode_ack_cmd_type_high_nibble_ignored();
 }

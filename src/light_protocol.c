@@ -39,7 +39,11 @@ bool light_protocol_decode_ack(const auxbeam_message_t *msg, uint8_t *seq_id_out
         return false;  // Not an acknowledgment
     }
 
-    if (msg->cmd_type != 0xF8) {
+    // Only the low nibble identifies the command class (0x8, output
+    // command). The high nibble varies between units: 0xF is documented, a
+    // real RA60 has been captured sending 0x1 (cmd_type 0x18). Its meaning
+    // is unknown, so it is not checked.
+    if ((msg->cmd_type & 0x0F) != 0x08) {
         return false;  // Invalid ACK cmd_type
     }
 

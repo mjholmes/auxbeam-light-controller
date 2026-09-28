@@ -14,7 +14,7 @@ Every frame -- command or acknowledgment -- is 11 bytes:
 |-------:|-----:|-------|----------------|-----------------------|
 | 0 | 1 | Sequence ID | echoed back unchanged by the ACK | |
 | 1 | 1 | Message type | `0x00` | `0xFF` |
-| 2 | 1 | Command type | `0x08` (output-altering command) | `0xF8` |
+| 2 | 1 | Command type | `0x08` (output-altering command) | `0xF8` or `0x18` (see below) |
 | 3 | 1 | Unknown | `0x0C` for output commands (`0x00`/`0x01` seen for master on/off, unverified) | `0x00` |
 | 4-7 | 4 | Output state | 8 packed nibbles, one per output (only 6 used) | mirrors the command, not meaningfully validated |
 | 8-9 | 2 | Unknown | always `0x00` observed | always `0x00` observed |
@@ -24,6 +24,20 @@ The sequence ID doesn't need to increment and isn't checked by the
 controller -- it's simply echoed back in the acknowledgment so the sender
 knows which command is being acknowledged. An invalid checksum causes the
 command to be silently ignored; no response is sent.
+
+### Acknowledgment command type
+
+The low nibble of byte 2 is `0x8` in both directions. In acknowledgments the
+high nibble varies: `0xF8` was documented originally, and a real RA60 has been
+captured replying `0x18`:
+
+```
+command: 00 00 08 0C 08 80 88 00 00 00 24
+ACK:     00 FF 18 00 08 80 88 00 00 00 27
+```
+
+The meaning of the high nibble is unknown, so the decoder checks only the low
+nibble (plus byte 1 = `0xFF`, the checksum, and a matching sequence ID).
 
 ### Checksum
 

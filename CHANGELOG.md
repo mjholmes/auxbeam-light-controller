@@ -7,6 +7,11 @@ releases begin.
 ## [Unreleased]
 
 ### Fixed
+- **L-5**: acknowledgments from a real RA60 were all rejected. The decoder
+  required byte 2 (`cmd_type`) to be exactly `0xF8`, but the RA60 replies
+  with `0x18` (captured on hardware: `00 FF 18 00 08 80 88 00 00 00 27`), so
+  every command timed out. `light_protocol_decode_ack()` now checks only the
+  low nibble (`0x8`); byte 1 must still be `0xFF` and the checksum valid.
 - **L-1**: a single stray or dropped byte on the wire would permanently
   desynchronize `process()`'s frame decoding -- reported and reproduced by
   an external review (5 valid ACKs sent after one stray byte matched 0 of
