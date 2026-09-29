@@ -120,13 +120,10 @@ the link permanently until reinit).
 
 ## Resource usage
 
-Static RAM footprint (context + queue + UART handle), measured via a
-host-side struct-size check with 32-bit pointers (approximating the ESP32's
-word size, since no ESP-IDF toolchain was available to produce a real
-linker map at the time this was measured): **244 bytes**, well under
-budget for a resource-constrained target. This has not yet been confirmed
-with a real `idf.py` build's linker map, nor has flash usage been measured
-the same way -- both are open items (see "Known limitations" below).
+Measured from a real `idf.py` build (ESP-IDF v5.5.5, esp32s3, `idf.py
+size-components`): **248 bytes** static RAM (.bss) and **1.6 KB** flash
+(1592 bytes code + 71 bytes rodata). The earlier host-side struct-size
+estimate was 244 bytes.
 
 ## Testing strategy
 
@@ -153,10 +150,9 @@ size.
 
 ## Known limitations
 
-- **No real target build has been verified.** Every fix in this codebase
-  was validated on the host test suite; `idf.py build` against an actual
-  ESP-IDF install (for real flash-size figures and target-specific
-  compilation) hasn't been run.
+- Verified on one RA60 unit only (ACK `cmd_type` 0x18, output nibble
+  order per the panel captures in `PROTOCOL.md`). Other AuxBeam hardware
+  may differ.
 - `test/target/` (hardware-in-loop tests against real ESP32 + RA60
   hardware) is not implemented.
 - Single controller instance only -- see "Single-instance design" above.

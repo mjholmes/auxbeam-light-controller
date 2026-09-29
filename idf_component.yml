@@ -1,4 +1,4 @@
-version: "0.1.0"
+version: "0.1.1"
 description: "ESP-IDF library for controlling an AuxBeam RA60 light controller (6 outputs: OFF/ON/STROBE) over a 2400 baud UART link, with acknowledgment/timeout handling."
 url: "https://github.com/mjholmes/auxbeam-light-controller"
 repository: "https://github.com/mjholmes/auxbeam-light-controller.git"

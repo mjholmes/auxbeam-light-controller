@@ -6,8 +6,9 @@ ESP-IDF library for controlling an AuxBeam RA60 light controller -- 6
 outputs, each independently OFF/ON/STROBE -- over a 2400 baud UART link,
 with acknowledgment matching and timeout detection built in.
 
-**Status**: pre-1.0, host-tested (593 checks, no ESP32/RA60 hardware
-required), not yet verified against a real `idf.py` build. See
+**Status**: pre-1.0, host-tested (632 checks, no ESP32/RA60 hardware
+required), and in use on real hardware: built with `idf.py` (ESP-IDF
+v5.5.5, esp32s3) and driving an RA60 installed in a vehicle. See
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#known-limitations).
 
 > **Not thread-safe by design.** There is no internal locking. Every API

@@ -6,6 +6,12 @@ releases begin.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-29
+
+First release verified on hardware: built with `idf.py` (ESP-IDF v5.5.5,
+esp32s3) and switching outputs on an RA60 installed in a vehicle. Contains
+all fixes since 0.1.0; 0.1.0 does not work with a real RA60 (L-5, L-6).
+
 ### Fixed
 - **L-6**: output nibbles were packed in the wrong order. The RA60 expects
   the lower-numbered output in the HIGH nibble of each byte (panel capture:
